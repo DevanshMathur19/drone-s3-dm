@@ -530,3 +530,4 @@ func assumeRoleWithWebIdentity(sess *session.Session, roleArn, roleSessionName, 
 	}
 	return credentials.NewStaticCredentials(*result.Credentials.AccessKeyId, *result.Credentials.SecretAccessKey, *result.Credentials.SessionToken), nil
 }
+
