@@ -282,38 +282,33 @@ func matchExtension(match string, stringMap map[string]string) string {
 }
 
 func assumeRole(roleArn, roleSessionName, externalID string) *credentials.Credentials {
-    log.WithFields(log.Fields{
-        "roleArn":         roleArn,
-        "roleSessionName": roleSessionName,
-        "externalID":      externalID,
-    }).Info("Attempting to assume role")
 
-    sess, _ := session.NewSession()
-    client := sts.New(sess)
-    duration := time.Hour * 1
-    stsProvider := &stscreds.AssumeRoleProvider{
-        Client:          client,
-        Duration:        duration,
-        RoleARN:         roleArn,
-        RoleSessionName: roleSessionName,
-    }
+	sess, _ := session.NewSession()
+	client := sts.New(sess)
+	duration := time.Hour * 1
+	stsProvider := &stscreds.AssumeRoleProvider{
+		Client:          client,
+		Duration:        duration,
+		RoleARN:         roleArn,
+		RoleSessionName: roleSessionName,
+	}
 
-    if externalID != "" {
-        stsProvider.ExternalID = &externalID
-        log.WithField("externalID", externalID).Info("Using external ID for assume role")
-    }
+	if externalID != "" {
+		stsProvider.ExternalID = &externalID
+		log.WithField("externalID", externalID).Info("Using external ID for assume role")
+	}
 
-    creds := credentials.NewCredentials(stsProvider)
+	creds := credentials.NewCredentials(stsProvider)
 
-    // Test the credentials
-    _, err := creds.Get()
-    if err != nil {
-        log.WithError(err).Error("Failed to assume role")
-    } else {
-        log.Info("Successfully assumed role")
-    }
+	// Test the credentials
+	_, err := creds.Get()
+	if err != nil {
+		log.WithError(err).Error("Failed to assume role")
+	} else {
+		log.Info("Successfully assumed role")
+	}
 
-    return creds
+	return creds
 }
 
 // resolveKey is a helper function that returns s3 object key where file present at srcPath is uploaded to.
@@ -452,16 +447,6 @@ func (p *Plugin) downloadS3Objects(client *s3.S3, sourceDir string) error {
 
 // createS3Client creates and returns an S3 client based on the plugin configuration
 func (p *Plugin) createS3Client() *s3.S3 {
-    log.WithFields(log.Fields{
-        "Region":              p.Region,
-        "Endpoint":            p.Endpoint,
-        "PathStyle":           p.PathStyle,
-        "ExternalID":          p.ExternalID,
-        "Bucket":              p.Bucket,
-        "AssumeRole":          p.AssumeRole,
-        "AssumeRoleSessionName": p.AssumeRoleSessionName,
-        "UserRoleArn":         p.UserRoleArn,
-    }).Info("Creating S3 client with connector details")
 
 	conf := &aws.Config{
 		Region:           aws.String(p.Region),
