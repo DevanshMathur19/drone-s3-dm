@@ -105,6 +105,9 @@ type Plugin struct {
 
 	// set OIDC ID Token to retrieve temporary credentials
 	IdToken string
+
+	// AWS session token for temporary credentials (e.g., from EKS Pod Identity, IRSA, STS)
+	SessionToken string
 }
 
 // Exec runs the plugin
@@ -382,7 +385,11 @@ func matchExtension(match string, stringMap map[string]string) string {
 
 func assumeRole(roleArn, roleSessionName, externalID string) *credentials.Credentials {
 
-	sess, _ := session.NewSession()
+	sess, err := session.NewSession()
+	if err != nil {
+		log.WithError(err).Error("failed to create AWS session for assume role")
+		return nil
+	}
 	client := sts.New(sess)
 	duration := time.Hour * 1
 	stsProvider := &stscreds.AssumeRoleProvider{
@@ -538,10 +545,11 @@ func (p *Plugin) downloadS3Objects(client *s3.S3, sourceDir string) error {
 func (p *Plugin) createS3Client() *s3.S3 {
 
 	conf := &aws.Config{
-		Region:           aws.String(p.Region),
-		Endpoint:         &p.Endpoint,
-		DisableSSL:       aws.Bool(strings.HasPrefix(p.Endpoint, "http://")),
-		S3ForcePathStyle: aws.Bool(p.PathStyle),
+		Region:                        aws.String(p.Region),
+		Endpoint:                      &p.Endpoint,
+		DisableSSL:                    aws.Bool(strings.HasPrefix(p.Endpoint, "http://")),
+		S3ForcePathStyle:              aws.Bool(p.PathStyle),
+		CredentialsChainVerboseErrors: aws.Bool(true),
 	}
 
 	// Create initial session
@@ -551,7 +559,12 @@ func (p *Plugin) createS3Client() *s3.S3 {
 	}
 
 	if p.Key != "" && p.Secret != "" {
-		conf.Credentials = credentials.NewStaticCredentials(p.Key, p.Secret, "")
+		if p.SessionToken != "" {
+			log.Info("Using static credentials with session token (temporary credentials)")
+		} else {
+			log.Info("Using static credentials (access key and secret key)")
+		}
+		conf.Credentials = credentials.NewStaticCredentials(p.Key, p.Secret, p.SessionToken)
 	} else if p.IdToken != "" && p.AssumeRole != "" {
 		creds, err := assumeRoleWithWebIdentity(sess, p.AssumeRole, p.AssumeRoleSessionName, p.IdToken)
 		if err != nil {
@@ -561,7 +574,19 @@ func (p *Plugin) createS3Client() *s3.S3 {
 	} else if p.AssumeRole != "" {
 		conf.Credentials = assumeRole(p.AssumeRole, p.AssumeRoleSessionName, p.ExternalID)
 	} else {
-		log.Warn("AWS Key and/or Secret not provided (falling back to ec2 instance profile)")
+		// No explicit credentials provided, falling back to the default AWS SDK credential chain.
+		// The SDK will check: env vars -> shared credentials -> container credentials -> EC2 IMDS
+		if containerCredsURI := os.Getenv("AWS_CONTAINER_CREDENTIALS_FULL_URI"); containerCredsURI != "" {
+			log.WithField("uri", containerCredsURI).Info(
+				"No explicit credentials provided; AWS SDK will use EKS Pod Identity / container credentials")
+		} else if os.Getenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI") != "" {
+			log.Info("No explicit credentials provided; AWS SDK will use ECS container credentials")
+		} else if os.Getenv("AWS_WEB_IDENTITY_TOKEN_FILE") != "" {
+			log.Info("No explicit credentials provided; AWS SDK will use IRSA (Web Identity Token)")
+		} else {
+			log.Warn("No AWS credentials provided and no container/identity credential source detected. " +
+				"Falling back to EC2 instance metadata (IMDS). This may fail if not running on EC2.")
+		}
 	}
 
 	// Create session with primary credentials
